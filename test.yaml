@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: This template deploys the Calabrio Lambda,Kinesis stream and associated policies
+Parameters:
+  pApplicationName:
+    Type: String
+    Description: Application name 
+    Default: ccc
+    AllowedValues: [ccc]
+  pEnvironmentName:
+    Type: String
+    Description: The name of the specific stack deployment e.g. 'dev-01'
+    Default: pd
+    AllowedValues: [pd, dv]
+Resources: 
+# Start resources for Calabrio Lambda Policies
+  rLambdaPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${pApplicationName}-${pEnvironmentName}-CalabrioLambdaAccessPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: VisualEditor0
+          Effect: Allow
+          Action:
+          - kinesis:GetRecords
+          - kinesis:GetShardIterator
+          - kinesis:DescribeStream
+          - kinesis:ListStreams
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          - s3:GetObject*
+          - s3:ListBucket
+          - s3:HeadObject
+          - s3:PutObject
+          - s3:GetBucketNotification
+          - s3:PutBucketNotification
+          Resource: "*"
+# Start resources for Calabrio Lambda Role
+  rLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${pApplicationName}-${pEnvironmentName}-CalabrioLambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - 
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns: 
+        - !Ref rLambdaPolicy
+# Start resources for Calabrio Firehose transform Lambda         
+  rreportLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${pApplicationName}-${pEnvironmentName}-CalabrioFirehoseTransform
+      Handler: CTRKinesisToS3.handler
+      Runtime: nodejs14.x
+      Description: Function used for transforming Firehose CTR Output
+      CodeUri: s3://ccc-pd-connect-ap-southeast-1-141686622640/deployment-files/calabrio-firehose-output-transform.zip
+      MemorySize: 128
+      Timeout: 60
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/${rLambdaExecutionRole}"
+      Environment:
+        Variables: 
+          s3Bucket : ccc-pd-connect-ap-southeast-1-141686622640
+          destination : "connect/ccc-pd-contactcentre/CTR"
+    DependsOn:
+      - rLambdaExecutionRole
+# Start resources for Calabrio One user and access policy
+  rCalabrioOneUserPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${pCompanyName}-${pEnvironmentName}-CalabrioUserPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Action:
+          - 'kinesis:GetShardIterator'
+          - 'kinesis:GetRecords'
+          - 'kinesis:DescribeStream'
+          - 's3:ListBucket'
+          - 's3:GetBucketLocation'
+          Resource: [
+            "arn:aws:kinesis:ap-southeast-1:141686622640:stream/ccc-pd-AGENTstream",
+            "arn:aws:s3:::ccc-pd-connect-ap-southeast-1-141686622640"]
+        Statement:
+        - Effect: Allow
+          Action:
+          - 's3:GetObject'
+          - 's3:PutObject'
+          - 's3:DeleteObject'
+          Resource: [
+            "arn:aws:s3:::ccc-pd-connect-ap-southeast-1-141686622640/connect/ccc-pd-contactcentre/CTR/*" ]   
+  rConnectAzureIAMuser:
+     Type: AWS::IAM::User
+     Properties:
+      UserName : !Sub ${pCompanyName}-${pEnvironmentName}-CalabrioOneUser
+      ManagedPolicyArns: 
+        - !Ref rCalabrioOneUserPolicy
